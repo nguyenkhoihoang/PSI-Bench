@@ -112,6 +112,7 @@ def get_all_psi_backend_pairs(token: Optional[str] = None, dataset_name: str = "
     hf_token = token or os.getenv("HF_TOKEN")
     dataset = load_dataset(dataset_name, split="train", token=hf_token)
     df = dataset.to_pandas()
+    print(f"Loaded dataset {dataset_name}")
     
     # Get unique pairs
     unique_pairs = df[['psi', 'backend_llm']].drop_duplicates()

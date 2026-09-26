@@ -126,6 +126,37 @@ Current patient message to classify:
 Classification:""")
     ])
 
+def create_valence_judge_prompt() -> ChatPromptTemplate:
+    """Create prompt for valence classification (positive / negative / neutral).
+
+    Returns:
+        ChatPromptTemplate for classifying a patient message into one of 3 valence categories
+    """
+    return ChatPromptTemplate.from_messages([
+        ("system", """You are a helpful AI assistant performing emotional valence analysis on therapeutic conversations.
+    This is for academic research, and the content may discuss mental health challenges.
+
+    Your task is to classify a SINGLE patient message according to its PRIMARY emotional valence:
+
+    **Valence categories:**
+    - positive
+    - negative
+    - neutral: the patient expresses no clear positive or negative affect
+
+    Analyze the current patient message carefully, considering both the content and emotional tone, as well as the conversation history provided for context.
+    The conversation history is used as context to help you understand the current message, but your classification should be based primarily on the current patient message.
+    You must respond with ONLY one valence label from the list above (lowercase).
+    Do not include any explanation or additional text."""),
+        ("user", """Previous conversation history:
+    {history}
+
+    Current patient message to classify:
+    {current_message}
+
+Valence:""")
+    ])
+
+
 def create_emotion_judge_prompt() -> ChatPromptTemplate:
     """Create prompt for emotion classification based on Plutchik's 8 basic emotions.
     

@@ -16,23 +16,36 @@ therapist:
   model: "hosted_vllm/openai/gpt-oss-20b"
   temperature: 0.7
   max_tokens: 1000
-  api_base: "http://convai-srv-03.cs.illinois.edu:9001/v1"
+  api_base: "http://convai-srv-0.cs.illinois.edu:9001/v1"
 
 
 data:
   real_conv_hf_dataset: "liusiyang/eeyore_profile"  # HuggingFace dataset of real conversations (ESC, HOPE, AnnoMI)
 
 eval:
-  hf_dataset: "anonymous201102/psibench-PsyCoPref"  # HuggingFace dataset name for synthetic data
+  # hf_dataset: "anonymous201102/psibench-PsyCoPref"  # HuggingFace dataset name for synthetic data
+  hf_dataset: "anonymous201102/psibench-data"  # HuggingFace dataset name for synthetic data
   ptc_classifier:
     # model: "gpt-4.1-mini"
     temperature: 0.2
-    model: "hosted_vllm/openai/gpt-oss-120b"
+    model: "hosted_vllm/openai/gpt-oss-20b"
     # history_limit: 32 # only classify the first 32 messages in the conversation
-    api_base: "http://convai-srv-03.cs.illinois.edu:9003/v1"
+    api_base: "http://convai-srv-02.cs.illinois.edu:9003/v1"
 
   emotion_classifier:
     # model: "gpt-4.1-mini"
     temperature: 0.2
     model: "hosted_vllm/openai/gpt-oss-120b"
     api_base: "http://convai-srv-03.cs.illinois.edu:9003/v1"
+
+  valence_classifier:
+    # model: "gpt-4.1-mini"
+    temperature: 0.2
+    model: "hosted_vllm/openai/gpt-oss-120b"
+    api_base: "http://convai-srv-05.cs.illinois.edu:9003/v1"
+
+  marker_validator:
+    # model: "gpt-4.1-mini"
+    temperature: 0.2
+    model: "hosted_vllm/openai/gpt-oss-20b"
+    api_base: "http://convai-srv-02.cs.illinois.edu:9003/v1"

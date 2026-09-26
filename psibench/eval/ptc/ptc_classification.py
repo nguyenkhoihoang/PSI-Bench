@@ -706,8 +706,8 @@ def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: i
     print(f"[INFO] Analyzed {len(real_df)} real conversations")
     
     # Get all PSI-backend pairs
-    print("\n[INFO] Loading all unique PSI-backend pairs...")
     dataset_name = config.get('eval', {}).get('hf_dataset', 'hknguyen20/psibench-data')
+    print(f"[INFO] Loading all unique PSI-backend pairs from {dataset_name}")
     all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name)
     print(f"[INFO] Found {len(all_pairs)} unique (psi, backend_llm) pairs\n")
     

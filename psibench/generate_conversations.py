@@ -102,6 +102,8 @@ def parse_args():
                        help="Path to config file (default: configs/default.yaml)")
     parser.add_argument("--batch-size", type=int, default=1,
                        help="Number of parallel tasks to run (default: 1)")
+    parser.add_argument("--reverse", action="store_true",
+                       help="Process sessions in reverse order (last session first)")
     parser.add_argument("--ccd-source", type=str, default=None,
                        help="Source for pre-extracted CCDs: local directory path or HuggingFace dataset ID. "
                             "If not provided, CCDs will be extracted on-the-fly (patientpsi only)")
@@ -229,6 +231,9 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = load_real_dataset(args.dataset, hf_dataset=config.get("data", {}).get("real_conv_hf_dataset"))
+
+    if args.reverse:
+        df = df.iloc[::-1]
 
     if args.N:
         df = df.head(args.N)
