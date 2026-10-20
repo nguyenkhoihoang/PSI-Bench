@@ -34,7 +34,7 @@ Generated synthetic conversations are written under:
 ## 3) Generate synthetic data
 
 Common options:
-- `--psi`: `patientpsi`(default), `roleplaydoh`
+- `--psi`: `patientpsi`(default), `roleplaydoh`, `persimmon` (hosted API; needs `pip install humansand`, Python 3.12+, and `export USER_MODEL_API_KEY=usk_...`; optional `persimmon:` config block with `model`, `harness`, `max_tokens`, `requests_per_minute`. Use a small `--batch-size`, e.g. 2, since the key allows 60 requests/min)
 
 If using offline vLLM models, follow `vllm_serve/README.md` first.
 

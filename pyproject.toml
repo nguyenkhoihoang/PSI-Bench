@@ -39,6 +39,6 @@ dependencies = [
     "scikit-learn",
     "statsmodels",
     "spacy==3.7.2",
-    "emoatlas",
-    "supabase"
+    "supabase",
+    "humansand; python_version >= '3.12'"
 ]
