@@ -72,6 +72,9 @@ from psibench.eval.utils import (
     extract_backend_name_from_label,
     assign_backend_markers,
     PSI_COLORS,
+    PERSIMMON_COLOR,
+    is_persimmon_label,
+    highlight_persimmon_ticklabels,
     build_conversation_id,
 )
 from psibench.data_loader.utils import normalize_backend_name
@@ -601,7 +604,8 @@ def analyze_conversations(
 
 def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: int = 1, 
                          single_turn: bool = False, num_messages: int = 6, exact_turns: int = None, 
-                         turn_threshold: int = 16, debug: bool = False):
+                         turn_threshold: int = 16, debug: bool = False,
+                         synthetic_dir: str = None):
     """Compare PTC distributions across all PSI-backend pairs from HuggingFace against real data.
     
     Args:
@@ -708,7 +712,7 @@ def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: i
     # Get all PSI-backend pairs
     dataset_name = config.get('eval', {}).get('hf_dataset', 'hknguyen20/psibench-data')
     print(f"[INFO] Loading all unique PSI-backend pairs from {dataset_name}")
-    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name)
+    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name, synthetic_dir=synthetic_dir)
     print(f"[INFO] Found {len(all_pairs)} unique (psi, backend_llm) pairs\n")
     
     # Analyze all synthetic pairs
@@ -741,7 +745,7 @@ def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: i
                 print(f"[WARNING] Failed to load existing file: {e}. Reprocessing...")
         
         try:
-            synthetic_df_hf = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name)
+            synthetic_df_hf = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name, synthetic_dir=synthetic_dir)
             if synthetic_df_hf.empty:
                 print(f"  ⚠ No synthetic data found for {psi} + {normalized_backend}")
                 continue
@@ -886,7 +890,7 @@ def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: i
         synth_df = all_synthetic_results[label]
         
         # Create display label
-        display_label = label
+        display_label = 'Persimmon' if is_persimmon_label(label) else label
         for psi in PSI_ABBREV.keys():
             if label.startswith(psi):
                 backend_part = label[len(psi):].lstrip('-_')
@@ -944,7 +948,7 @@ def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: i
         js_dist = calculate_jensenshannon_distance(real_ptcf, synth_ptcf)
         
         # Get display name
-        display_name = label
+        display_name = 'Persimmon' if is_persimmon_label(label) else label
         for psi in PSI_ABBREV.keys():
             if label.startswith(psi):
                 backend = label[len(psi)+1:]  # +1 for the dash
@@ -1164,7 +1168,7 @@ def visualize_all_distributions(real_df: pd.DataFrame, all_synthetic_results: Di
         })
     
     # Synthetic data - sorted by PSI and model size
-    for label in sorted(all_synthetic_results.keys(), key=sort_key_by_psi_and_size):
+    for label in sorted(all_synthetic_results.keys(), key=lambda l: (0 if is_persimmon_label(l) else 1, sort_key_by_psi_and_size(l))):
         synth_df = all_synthetic_results[label]
         
         synth_p = synth_df['P_count'].sum() / synth_df['total_patient_turns'].sum()
@@ -1173,7 +1177,7 @@ def visualize_all_distributions(real_df: pd.DataFrame, all_synthetic_results: Di
         synth_f = synth_df['F_count'].sum() / synth_df['total_patient_turns'].sum()
         
         # Create display label
-        display_label = label
+        display_label = 'Persimmon' if is_persimmon_label(label) else label
         for psi in PSI_ABBREV.keys():
             if label.startswith(psi):
                 backend_part = label[len(psi):].lstrip('-_')
@@ -1272,6 +1276,7 @@ def visualize_all_distributions(real_df: pd.DataFrame, all_synthetic_results: Di
     ax.set_xlabel('Ratio', fontsize=18)
     ax.set_xlim(0, 1)
     ax.tick_params(axis='y', labelsize=18)
+    highlight_persimmon_ticklabels(ax)
     ax.tick_params(axis='x', labelsize=14)
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=16, title='Categories')
     ax.grid(axis='x', alpha=0.3)
@@ -1316,7 +1321,8 @@ def visualize_all_progressions(real_df: pd.DataFrame, all_synthetic_results: Dic
             where='mid', label='Real', linewidth=2.5, alpha=0.9, color='black', marker='|', markersize=5)
     
     # Build family-aware marker map once and reuse across plots/legend.
-    backend_by_label = {label: extract_backend_name_from_label(label) for label in all_synthetic_results.keys()}
+    backend_by_label = {label: extract_backend_name_from_label(label) for label in all_synthetic_results.keys()
+                        if not is_persimmon_label(label)}
     sorted_backends = sorted(set(backend_by_label.values()), key=sort_key_by_backend_family_and_size)
     backend_markers = assign_backend_markers(sorted_backends)
     
@@ -1327,7 +1333,7 @@ def visualize_all_progressions(real_df: pd.DataFrame, all_synthetic_results: Dic
     used_backends = set()
     
     # Plot synthetic data for each variant
-    for label in sorted(all_synthetic_results.keys(), key=sort_key_by_psi_and_size):
+    for label in sorted(all_synthetic_results.keys(), key=lambda l: (1 if is_persimmon_label(l) else 0, sort_key_by_psi_and_size(l))):
         synth_df = all_synthetic_results[label]
         
         # Get turn-by-turn data
@@ -1335,6 +1341,12 @@ def visualize_all_progressions(real_df: pd.DataFrame, all_synthetic_results: Dic
         synth_turns = synth_turns[synth_turns['turn_index'] < turn_threshold].copy()
         synth_turns['ptc_numeric'] = synth_turns['classification'].map(ptc_map)
         synth_avg = synth_turns.groupby('turn_index')['ptc_numeric'].mean().reset_index()
+
+        if is_persimmon_label(label):
+            used_psi_types.add('persimmon')
+            ax.step(synth_avg['turn_index'], synth_avg['ptc_numeric'],
+                    where='mid', linewidth=2.5, alpha=0.9, color=PERSIMMON_COLOR, marker='|', markersize=5)
+            continue
         
         # Determine PSI type and backend
         psi_type = None
@@ -1439,7 +1451,8 @@ def visualize_ptc_percentages_by_turn(real_df: pd.DataFrame, all_synthetic_resul
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Build family-aware marker map once and reuse across plots/legend.
-    backend_by_label = {label: extract_backend_name_from_label(label) for label in all_synthetic_results.keys()}
+    backend_by_label = {label: extract_backend_name_from_label(label) for label in all_synthetic_results.keys()
+                        if not is_persimmon_label(label)}
     sorted_backends = sorted(set(backend_by_label.values()), key=sort_key_by_backend_family_and_size)
     backend_markers = assign_backend_markers(sorted_backends)
     
@@ -1563,13 +1576,19 @@ def visualize_ptc_percentages_by_turn(real_df: pd.DataFrame, all_synthetic_resul
             linewidth=3.2, alpha=0.9, color='black', marker='o', markersize=8)
         
         # Plot synthetic data using pre-calculated percentages
-        for label in sorted(all_synthetic_results.keys(), key=sort_key_by_psi_and_size):
+        for label in sorted(all_synthetic_results.keys(), key=lambda l: (1 if is_persimmon_label(l) else 0, sort_key_by_psi_and_size(l))):
             if label not in all_percentages:
                 continue
             
             synth_percentages = [all_percentages[label][turn_idx][category] 
                                for turn_idx in range(turn_threshold) 
                                if turn_idx in all_percentages[label]]
+
+            if is_persimmon_label(label):
+                used_psi_types.add('persimmon')
+                ax.plot(range(len(synth_percentages)), synth_percentages,
+                        linewidth=3.2, alpha=0.9, color=PERSIMMON_COLOR, marker='o', markersize=8)
+                continue
             
             # Determine PSI type and backend
             parts = label.split('-')
@@ -1775,7 +1794,7 @@ def visualize_turn_counts_by_model(real_df: pd.DataFrame, all_synthetic_results:
         if dataset_name == 'Real':
             display_label = 'Real'
         else:
-            display_label = dataset_name
+            display_label = 'Persimmon' if is_persimmon_label(dataset_name) else dataset_name
             for psi in PSI_ABBREV.keys():
                 if dataset_name.startswith(psi):
                     backend_part = dataset_name[len(psi):].lstrip('-_')
@@ -2212,7 +2231,7 @@ def redraw_from_csv(csv_dir: str, output_dir: str, min_turn: int = 16, turn_thre
         synth_df = all_synthetic_results[label]
         
         # Create display label
-        display_label = label
+        display_label = 'Persimmon' if is_persimmon_label(label) else label
         for psi in PSI_ABBREV.keys():
             if label.startswith(psi):
                 backend_part = label[len(psi):].lstrip('-_')
@@ -2270,7 +2289,7 @@ def redraw_from_csv(csv_dir: str, output_dir: str, min_turn: int = 16, turn_thre
         js_dist = calculate_jensenshannon_distance(real_ptcf, synth_ptcf, no_filler=no_filler)
         
         # Get display name
-        display_name = label
+        display_name = 'Persimmon' if is_persimmon_label(label) else label
         for psi in PSI_ABBREV.keys():
             if label.startswith(psi):
                 backend = label[len(psi)+1:]  # +1 for the dash
@@ -2360,9 +2379,10 @@ def main():
             exact_turns=args.exact_turns,
             no_filler=args.no_filler
         )
-    elif args.hf:
-        # Multi-dataset HF analysis mode
+    elif args.hf or (args.synthetic_dir and not args.compare):
+        # Multi-dataset analysis mode (synthetic side from HF, or from --synthetic-dir)
         compare_all_hf_pairs(
+            synthetic_dir=args.synthetic_dir,
             config=config,
             output_dir=output_dir,
             batch_size=args.batch_size,

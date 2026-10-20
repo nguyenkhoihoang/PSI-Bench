@@ -72,6 +72,10 @@ def normalize_dataset_name(name: str) -> str:
     """
     if not name or name == 'Real':
         return name
+
+    # Persimmon is a single method with no backend, whatever file it comes from.
+    if name.lower().startswith('persimmon'):
+        return 'Persimmon'
     
     # If already in short format (PS- or RD-), only resolve aliases
     if name.startswith('PS-') or name.startswith('RD-'):

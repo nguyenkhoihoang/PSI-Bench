@@ -58,6 +58,8 @@ from psibench.eval.utils import (
     PSI_ABBREV,
     PSI_LABELS,
     PSI_COLORS,
+    PERSIMMON_COLOR,
+    is_persimmon_label,
     sort_key_by_psi_and_size,
     sort_key_by_backend_family_and_size,
     create_display_label,
@@ -502,6 +504,7 @@ def visualize_combined_dot_plots(corr_df: pd.DataFrame, output_dir: Path) -> Non
     backend_by_dataset = {
         row['dataset']: extract_backend_name_from_label(row['dataset'])
         for _, row in synth_df.iterrows()
+        if not is_persimmon_label(row['dataset'])
     }
     sorted_backends = sorted(set(backend_by_dataset.values()), key=sort_key_by_backend_family_and_size)
     backend_markers = assign_backend_markers(sorted_backends)
@@ -527,6 +530,14 @@ def visualize_combined_dot_plots(corr_df: pd.DataFrame, output_dir: Path) -> Non
         right = x_max + pad
 
         ticks = np.array(x_ticks, dtype=int)
+        # Fixed ticks keep the paper layout; extend them only if a point (e.g. Persimmon) falls outside.
+        if ticks.size > 1:
+            step = int(ticks[1] - ticks[0])
+            slack = 0.05 * float(ticks[-1] - ticks[0])  # the padding the axis already has
+            while x_min < ticks[0] - slack:
+                ticks = np.insert(ticks, 0, ticks[0] - step)
+            while x_max > ticks[-1] + slack:
+                ticks = np.append(ticks, ticks[-1] + step)
         if ticks.size == 0:
             tick_step = max(1, int(np.ceil((right - left) / 4.0)))
             ticks = np.arange(int(np.floor(left)), int(np.ceil(right)) + 1, tick_step)
@@ -545,6 +556,11 @@ def visualize_combined_dot_plots(corr_df: pd.DataFrame, output_dir: Path) -> Non
                 color = 'black'
                 marker = 'o'
                 size = DOTPLOT_MARKER_SIZE
+            elif is_persimmon_label(dataset):
+                color = PERSIMMON_COLOR
+                marker = 'o'
+                size = DOTPLOT_MARKER_SIZE
+                used_psi_types.add('persimmon')
             else:
                 psi_type = 'patientpsi' if str(dataset).startswith('patientpsi') else 'roleplaydoh'
                 backend = backend_by_dataset.get(dataset, 'unknown')
@@ -883,6 +899,12 @@ def main():
         help="Path to config file (default: configs/default.yaml)"
     )
     parser.add_argument(
+        "--synthetic-dir",
+        type=str,
+        default=None,
+        help="Local folder tree of session_*.json (<psi>/<model>/<dataset>/...) used instead of the HF synthetic data; psi and model are read from the folder names"
+    )
+    parser.add_argument(
         "--csv-file",
         type=Path,
         default=None,
@@ -896,7 +918,7 @@ def main():
         action="store_true",
         help=(
             "Use combined-marker-only profile scoring in depressive_distance.csv: "
-            "ptk_distance is human-relative %, msg_difference is absolute %-point gap, "
+            "ptk_distance is human-relative %%, msg_difference is absolute %%-point gap, "
             "and final_score = 100 - avg(distance)."
         )
     )
@@ -942,7 +964,7 @@ def main():
     
     # Load all synthetic PSI-backend pairs
     print("\n[INFO] Loading all available PSI-backend pairs...")
-    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name)
+    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name, synthetic_dir=args.synthetic_dir)
     print(f"[INFO] Found {len(all_pairs)} unique PSI-backend pairs")
     
     # Load synthetic data for each pair
@@ -955,7 +977,7 @@ def main():
         
         # Load synthetic conversations
         try:
-            df = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name)
+            df = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name, synthetic_dir=args.synthetic_dir)
             if df.empty:
                 print(f"[WARNING] No data found for {label}")
                 continue

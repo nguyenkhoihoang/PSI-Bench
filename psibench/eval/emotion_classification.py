@@ -256,7 +256,7 @@ class EmotionClassifier:
 
 def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: int = 1,
                          num_messages: int = 4, exact_turns: int = None, turn_threshold: int = 12,
-                         debug: bool = False, ptc_plot_file: str = None):
+                         debug: bool = False, ptc_plot_file: str = None, synthetic_dir: str = None):
     """Compare emotion distributions across all PSI-backend pairs from HuggingFace against real data.
     
     Args:
@@ -353,7 +353,7 @@ def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: i
     
     # Get all PSI-backend pairs
     print("\n[INFO] Loading all unique PSI-backend pairs...")
-    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name)
+    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name, synthetic_dir=synthetic_dir)
     print(f"[INFO] Found {len(all_pairs)} unique (psi, backend_llm) pairs")
     print(f"[INFO] Loading synthetic data from HF dataset: {dataset_name}\n")
     
@@ -390,7 +390,7 @@ def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: i
         
         try:
             # Load from HF
-            df_hf = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name)
+            df_hf = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name, synthetic_dir=synthetic_dir)
             
             if df_hf.empty:
                 print(f"[WARNING] No data found for {label}, skipping")
@@ -1086,6 +1086,8 @@ def main():
                        help='Output directory')
     parser.add_argument('--hf', action='store_true',
                        help='Load all psi/backend pairs from HF dataset')
+    parser.add_argument('--synthetic-dir', type=str, default=None,
+                       help='Local folder tree of session_*.json (<psi>/<model>/<dataset>/...) used instead of the HF synthetic data; psi and model are read from the folder names')
     parser.add_argument('--csv-file', type=str, default=None,
                        help='Directory containing CSV/JSON files to redraw graphs from')
     parser.add_argument('--config', type=str, default='configs/default.yaml',
@@ -1140,8 +1142,8 @@ def main():
             exact_turns=args.exact_turns,
             ptc_plot_file=args.ptc_plot_file,
         )
-    elif args.hf:
-        # Multi-dataset HF analysis mode
+    elif args.hf or args.synthetic_dir:
+        # Multi-dataset analysis mode (synthetic side from HF or --synthetic-dir)
         judge = EmotionClassifier(config, debug=args.debug)
         compare_all_hf_pairs(
             config=config,
@@ -1152,9 +1154,10 @@ def main():
             turn_threshold=args.turn_threshold,
             debug=args.debug,
             ptc_plot_file=args.ptc_plot_file,
+            synthetic_dir=args.synthetic_dir,
         )
     else:
-        print("Error: Please provide --hf or --csv-file")
+        print("Error: Please provide --hf, --synthetic-dir or --csv-file")
         return
     
     end_time = time.time()

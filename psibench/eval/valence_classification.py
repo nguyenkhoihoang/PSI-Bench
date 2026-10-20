@@ -19,6 +19,12 @@ python -m psibench.eval.valence_classification \\
   --turn-threshold 16 \\
   --config configs/default.yaml
 
+# Same as --hf, but the synthetic side is a local dir of session_*.json
+# (real data is still loaded exactly as in --hf)
+python -m psibench.eval.valence_classification \\
+  --synthetic-dir data/synthetic \\
+  --output-dir output/valence_analysis --turn-threshold 16
+
 # Redraw from saved CSV:
 python -m psibench.eval.valence_classification \\
   --csv-file output/valence_analysis \\
@@ -58,6 +64,9 @@ from psibench.eval.utils import (
     extract_backend_name_from_label,
     assign_backend_markers,
     PSI_COLORS,
+    PERSIMMON_COLOR,
+    is_persimmon_label,
+    highlight_persimmon_ticklabels,
     build_conversation_id,
 )
 from psibench.data_loader.utils import normalize_backend_name
@@ -196,7 +205,7 @@ class ValenceClassifier:
 
 def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: int = 1,
                          num_messages: int = 4, exact_turns: int = None, turn_threshold: int = 12,
-                         debug: bool = False):
+                         debug: bool = False, synthetic_dir: str = None):
     """Compare valence distributions across all PSI-backend pairs from HuggingFace against real data."""
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -272,7 +281,7 @@ def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: i
     dataset_name = config.get('eval', {}).get('hf_dataset', 'hknguyen20/psibench-data')
 
     print(f"[INFO] Loading all unique PSI-backend pairs from {dataset_name}")
-    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name)
+    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name, synthetic_dir=synthetic_dir)
     print(f"[INFO] Found {len(all_pairs)} unique (psi, backend_llm) pairs")
 
     all_synthetic_results = {}
@@ -304,7 +313,7 @@ def compare_all_hf_pairs(config: Dict[str, Any], output_dir: Path, batch_size: i
                 print(f"[WARNING] Failed to load existing file: {e}. Reprocessing...")
 
         try:
-            df_hf = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name)
+            df_hf = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name, synthetic_dir=synthetic_dir)
 
             if df_hf.empty:
                 print(f"[WARNING] No data found for {label}, skipping")
@@ -461,7 +470,8 @@ def visualize_valence_percentages_by_turn(real_df: pd.DataFrame, all_synthetic_r
     fig, axes = plt.subplots(1, 3, figsize=(21, 4.8))
     axes = axes.flatten()
 
-    backend_by_label = {label: extract_backend_name_from_label(label) for label in all_synthetic_results.keys()}
+    backend_by_label = {label: extract_backend_name_from_label(label) for label in all_synthetic_results.keys()
+                        if not is_persimmon_label(label)}
     sorted_backends = sorted(set(backend_by_label.values()), key=sort_key_by_backend_family_and_size)
     backend_markers = assign_backend_markers(sorted_backends)
     all_model_sizes = [extract_model_size(b) for b in sorted_backends if extract_model_size(b) > 0]
@@ -473,8 +483,12 @@ def visualize_valence_percentages_by_turn(real_df: pd.DataFrame, all_synthetic_r
         ax.plot(real_data['turn_index'], real_data['percentage'],
                 linewidth=3.2, alpha=0.9, color='black', marker='o', markersize=8)
 
-        for label in sorted(all_synthetic_results.keys(), key=sort_key_by_psi_and_size):
+        for label in sorted(all_synthetic_results.keys(), key=lambda l: (1 if is_persimmon_label(l) else 0, sort_key_by_psi_and_size(l))):
             synth_data = synthetic_percentages[label][v]
+            if is_persimmon_label(label):
+                ax.plot(synth_data['turn_index'], synth_data['percentage'],
+                        linewidth=3.2, alpha=0.9, color=PERSIMMON_COLOR, marker='o', markersize=8)
+                continue
             psi_type = 'patientpsi' if 'patientpsi' in label else 'roleplaydoh'
             color = PSI_COLORS.get(psi_type, '#808080')
             backend = backend_by_label.get(label, 'unknown')
@@ -598,7 +612,7 @@ def visualize_valence_distributions(real_df: pd.DataFrame, all_synthetic_results
         real_percentages[v] = real_df[count_col].sum() / real_df['total_patient_turns'].sum()
     dataset_stats.append({'label': 'real', 'display_name': 'Real', **real_percentages})
 
-    for label in sorted(all_synthetic_results.keys(), key=sort_key_by_psi_and_size):
+    for label in sorted(all_synthetic_results.keys(), key=lambda l: (0 if is_persimmon_label(l) else 1, sort_key_by_psi_and_size(l))):
         synth_df = all_synthetic_results[label]
         synth_percentages = {}
         for v in VALENCE_CATEGORIES:
@@ -609,7 +623,7 @@ def visualize_valence_distributions(real_df: pd.DataFrame, all_synthetic_results
         backend = label.split('_', 1)[1] if '_' in label else label
         short_backend = shorten_backend_name(backend)
         psi_abbrev = PSI_ABBREV.get(psi_type, psi_type)
-        display_name = f"{psi_abbrev}-{short_backend}"
+        display_name = 'Persimmon' if is_persimmon_label(label) else f"{psi_abbrev}-{short_backend}"
 
         dataset_stats.append({'label': label, 'display_name': display_name, **synth_percentages})
 
@@ -643,6 +657,7 @@ def visualize_valence_distributions(real_df: pd.DataFrame, all_synthetic_results
     ax.set_xlabel('Proportion', fontsize=18)
     ax.set_xlim(0, 1)
     ax.tick_params(axis='y', labelsize=16)
+    highlight_persimmon_ticklabels(ax)
     ax.tick_params(axis='x', labelsize=14)
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.08), fontsize=14, ncol=3, title='Valence')
     ax.grid(axis='x', alpha=0.3)
@@ -728,6 +743,8 @@ def main():
     parser = argparse.ArgumentParser(description='Classify patient turns by emotional valence (positive/negative/neutral)')
     parser.add_argument('--output-dir', type=str, default='output/valence_analysis', help='Output directory')
     parser.add_argument('--hf', action='store_true', help='Load all psi/backend pairs from HF dataset')
+    parser.add_argument('--synthetic-dir', type=str, default=None,
+                        help='Local directory of session_*.json files to classify (no HF access)')
     parser.add_argument('--csv-file', type=str, default=None,
                         help='Directory containing CSV/JSON files to redraw graphs from')
     parser.add_argument('--config', type=str, default='configs/default.yaml',
@@ -767,8 +784,9 @@ def main():
             turn_threshold=args.turn_threshold,
             exact_turns=args.exact_turns,
         )
-    elif args.hf:
+    elif args.hf or args.synthetic_dir:
         compare_all_hf_pairs(
+            synthetic_dir=args.synthetic_dir,
             config=config,
             output_dir=output_dir,
             batch_size=args.batch_size,
@@ -778,7 +796,7 @@ def main():
             debug=args.debug,
         )
     else:
-        print("Error: Please provide --hf or --csv-file")
+        print("Error: Please provide --hf, --synthetic-dir or --csv-file")
         return
 
     elapsed = time.time() - start_time

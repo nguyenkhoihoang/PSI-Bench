@@ -120,7 +120,9 @@ def sort_key_by_base_model(dataset_name: str) -> Tuple[int, int]:
 
 
 def get_display_name(dataset_name: str) -> str:
-    """Convert dataset name to display name with PSI abbreviation."""
+    """Convert dataset name to display name with PSI abbreviation (Persimmon has no backend)."""
+    if dataset_name.lower().startswith('persimmon'):
+        return 'Persimmon'
     for psi, abbrev in PSI_ABBREV.items():
         if dataset_name.startswith(psi + '_'):
             backend_part = dataset_name[len(psi) + 1:]  # +1 for underscore
