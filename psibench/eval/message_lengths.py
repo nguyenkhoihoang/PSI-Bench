@@ -25,7 +25,9 @@ from psibench.eval.utils import (
     sort_key_by_base_model,
     extract_base_model,
     get_model_family_priority,
-    PSI_ABBREV
+    PSI_ABBREV,
+    is_persimmon_label,
+    PERSIMMON_COLOR,
 )
 
 from psibench.data_loader.main_loader import (
@@ -177,7 +179,8 @@ def compare_conversation_sets(synthetic_convs: List[Dict], real_convs: List[Dict
     return synthetic_df, real_df, comparison_df
 
 
-def compare_all_hf_pairs(config_path: str, output_dir: str, sort_method: str = 'psi-size'):
+def compare_all_hf_pairs(config_path: str, output_dir: str, sort_method: str = 'psi-size',
+                         synthetic_dir: str = None):
     """Compare all available HF psi/backend pairs against all real datasets combined (train split).
     
     Args:
@@ -211,7 +214,7 @@ def compare_all_hf_pairs(config_path: str, output_dir: str, sort_method: str = '
     # Get all unique (psi, backend_llm) pairs
     print("Loading all unique PSI-backend pairs...")
     dataset_name = config.get('eval', {}).get('hf_dataset', 'hknguyen20/psibench-data')
-    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name)
+    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name, synthetic_dir=synthetic_dir)
     print(f"Found {len(all_pairs)} unique (psi, backend_llm) pairs\n")
 
     # Load all synthetic data
@@ -226,6 +229,7 @@ def compare_all_hf_pairs(config_path: str, output_dir: str, sort_method: str = '
             psi=psi,
             backend_llm=backend_llm,
             dataset_name=dataset_name,
+            synthetic_dir=synthetic_dir,
         )
 
         if synthetic_df_all.empty:
@@ -275,7 +279,7 @@ def calculate_mean_differences(real_df: pd.DataFrame, synthetic_data: Dict[str, 
         mean_diff = mean_synth_words - mean_real_words
         
         # Create display label following emo_detection.py style
-        display_label = variant_name
+        display_label = 'Persimmon' if is_persimmon_label(variant_name) else variant_name
         for psi in PSI_ABBREV.keys():
             if variant_name.startswith(psi):
                 backend_part = variant_name[len(psi):].lstrip('-_')
@@ -322,7 +326,7 @@ def create_comprehensive_metrics_csv(real_df: pd.DataFrame, synthetic_data: Dict
     # Calculate overall means for each synthetic variant
     for variant_name, synth_df in synthetic_data.items():
         # Create display label
-        display_label = variant_name
+        display_label = 'Persimmon' if is_persimmon_label(variant_name) else variant_name
         for psi in PSI_ABBREV.keys():
             if variant_name.startswith(psi):
                 backend_part = variant_name[len(psi):].lstrip('-_')
@@ -462,9 +466,17 @@ def plot_metric_comparison(real_df: pd.DataFrame, synthetic_data: Dict[str, pd.D
     # Track which PSI types and backends are actually used
     used_psi_types = set()
     used_backends = set()
+    has_persimmon = False
     
     # Plot synthetic data for each variant
     for variant_name, synth_df in sorted(synthetic_data_filtered.items()):
+        if is_persimmon_label(variant_name):
+            # Single method without a backend LLM: styled like the human line, in green.
+            has_persimmon = True
+            ax.plot(synth_df['turn'], synth_df[metric_col],
+                    linewidth=2, alpha=0.9, color=PERSIMMON_COLOR, linestyle='-', marker='|', markersize=5)
+            continue
+
         psi_type = None
         backend_llm = None
         
@@ -501,6 +513,8 @@ def plot_metric_comparison(real_df: pd.DataFrame, synthetic_data: Dict[str, pd.D
     from matplotlib.lines import Line2D
     
     color_legend_elements = [Line2D([0], [0], color='black', linewidth=2, label='Real')]
+    if has_persimmon:
+        color_legend_elements.append(Line2D([0], [0], color=PERSIMMON_COLOR, linewidth=2, label='Persimmon'))
     for psi_type in sorted(used_psi_types):
         if psi_type in psi_colors:
             color_legend_elements.append(
@@ -636,9 +650,13 @@ def main():
         help="Sorting method for results: 'psi-size' (sort by PSI then model size) or 'base-model' (sort by base model family, then size) (default: psi-size)"
     )
     
+    parser.add_argument('--synthetic-dir', type=str, default=None,
+                        help='Local folder tree of session_*.json (<psi>/<model>/<dataset>/...) used instead of the HF synthetic data; psi and model are read from the folder names')
+
     args = parser.parse_args()
     
     compare_all_hf_pairs(
+        synthetic_dir=args.synthetic_dir,
         config_path=args.config,
         output_dir=args.output_dir,
         sort_method=args.sort_method,

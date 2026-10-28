@@ -2,9 +2,9 @@
 # run_eval.sh — Full PSI-bench evaluation pipeline
 #
 # Pipeline:
-#   Step 1 (LLM)  : Classify emotions  (runs in background)
+#   Step 1 (LLM)  : Classify valence   (runs in background)
 #   Step 1 (LLM)  : Classify PTC codes (runs in background)
-#   Step 2 (wait) : JS divergence for emotion & PTC (needs Step 1 outputs)
+#   Step 2 (wait) : JS divergence for valence & PTC (needs Step 1 outputs)
 #   Step 3        : Depressive linguistic markers
 #   Step 3        : Message lengths
 #   Step 3        : Lexical diversity (MTLD)
@@ -46,31 +46,31 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── derived output paths ─────────────────────────────────────────────────────
-EMO_DIR="${OUTPUT_DIR}/emotion_analysis"
+VALENCE_DIR="${OUTPUT_DIR}/valence_analysis"
 PTC_DIR="${OUTPUT_DIR}/ptc_analysis"
 DEP_DIR="${OUTPUT_DIR}/depressive_markers"
 LEN_DIR="${OUTPUT_DIR}/length_comparison"
 LEX_DIR="${OUTPUT_DIR}/lexical_diversity"
 AGG_DIR="${OUTPUT_DIR}/aggregate"
 
-mkdir -p "$EMO_DIR" "$PTC_DIR" "$DEP_DIR" "$LEN_DIR" "$LEX_DIR" "$AGG_DIR"
+mkdir -p "$VALENCE_DIR" "$PTC_DIR" "$DEP_DIR" "$LEN_DIR" "$LEX_DIR" "$AGG_DIR"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
 # ────────────────────────────────────────────────────────────────────────────
-# STEP 1 — LLM classification (emotion + PTC) — run in parallel
+# STEP 1 — LLM classification (valence + PTC) — run in parallel
 # ────────────────────────────────────────────────────────────────────────────
 log "Step 1: Starting LLM classifiers in background..."
 
-python -m psibench.eval.emotion_classification \
+python -m psibench.eval.valence_classification \
   --hf \
   --batch-size "$BATCH_SIZE" \
   --turn-threshold "$TURN_THRESHOLD" \
-  --output-dir "$EMO_DIR" \
+  --output-dir "$VALENCE_DIR" \
   --config "$CONFIG" \
-  > "${OUTPUT_DIR}/emotion_classification.out" 2>&1 &
-EMO_PID=$!
-log "  Emotion classifier PID=$EMO_PID  (log: ${OUTPUT_DIR}/emotion_classification.out)"
+  > "${OUTPUT_DIR}/valence_classification.out" 2>&1 &
+VALENCE_PID=$!
+log "  Valence classifier PID=$VALENCE_PID  (log: ${OUTPUT_DIR}/valence_classification.out)"
 
 python -m psibench.eval.ptc.ptc_classification \
   --hf \
@@ -86,8 +86,8 @@ log "  PTC classifier      PID=$PTC_PID  (log: ${OUTPUT_DIR}/ptc_classification.
 
 # ── wait for both classifiers ────────────────────────────────────────────────
 log "  Waiting for classifiers to finish..."
-wait "$EMO_PID" || { log "ERROR: emotion classification failed — check ${OUTPUT_DIR}/emotion_classification.out"; exit 1; }
-log "  Emotion classification done."
+wait "$VALENCE_PID" || { log "ERROR: valence classification failed — check ${OUTPUT_DIR}/valence_classification.out"; exit 1; }
+log "  Valence classification done."
 wait "$PTC_PID" || { log "ERROR: PTC classification failed — check ${OUTPUT_DIR}/ptc_classification.out"; exit 1; }
 log "  PTC classification done."
 
@@ -97,12 +97,12 @@ log "  PTC classification done."
 log "Step 2: Computing JS divergence..."
 
 python psibench/eval/js_divergence.py \
-  --csv-file "${EMO_DIR}/emotion_percentages_by_turn_t16_no_neutral.csv" \
+  --csv-file "${VALENCE_DIR}/valence_percentages_by_turn_t16_no_neutral.csv" \
   --turn-threshold "$TURN_THRESHOLD" \
-  --output-dir "$EMO_DIR" \
-  --label-column emotion \
-  --label-type emotion
-log "  Emotion JS divergence done."
+  --output-dir "$VALENCE_DIR" \
+  --label-column valence \
+  --label-type valence
+log "  Valence JS divergence done."
 
 python psibench/eval/js_divergence.py \
   --csv-file "${PTC_DIR}/ptc_percentages_by_turn_t16_no_filler.csv" \
@@ -160,7 +160,7 @@ log "Step 4: Aggregating all metrics..."
 
 python psibench/eval/aggregate.py \
   --mtld    "${LEX_DIR}/wasserstein_distances.csv" \
-  --emo     "${EMO_DIR}/emotion_js_divergence_average.csv" \
+  --valence "${VALENCE_DIR}/valence_js_divergence_average.csv" \
   --ptc     "${PTC_DIR}/ptc_js_divergence_average.csv" \
   --verbosity "${LEN_DIR}/hf/comprehensive_metrics.csv" \
   --depressive "${DEP_DIR}/depressive_distance.csv" \

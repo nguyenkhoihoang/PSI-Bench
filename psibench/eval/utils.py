@@ -13,7 +13,8 @@ PSI_ABBREV = {
 PSI_LABELS = {
     'Real': 'Human',
     'patientpsi': r'PATIENT-$\Psi$', 
-    'roleplaydoh': 'Roleplay-doh'
+    'roleplaydoh': 'Roleplay-doh',
+    'persimmon': 'Persimmon',
 }
 
 # Marker styles for plotting different backend models
@@ -32,7 +33,26 @@ FAMILY_MARKER_STYLES = {
 PSI_COLORS = {
     'patientpsi': '#1f77b4',
     'roleplaydoh': '#ff7f0e',
+    'persimmon': '#2ca02c',
 }
+
+# Persimmon is a single method with no backend LLM, so it is drawn like the human line
+# (solid line, circle markers) in its own colour rather than as a PSI x backend pair.
+PERSIMMON_COLOR = PSI_COLORS['persimmon']
+
+
+def is_persimmon_label(label) -> bool:
+    """True for dataset labels / display names of the Persimmon method (any separator or case)."""
+    return str(label).lower().startswith('persimmon')
+
+
+def highlight_persimmon_ticklabels(ax, axis: str = 'y') -> None:
+    """Colour the 'Persimmon' tick label green so it stands out in bar / dot charts."""
+    labels = ax.get_yticklabels() if axis == 'y' else ax.get_xticklabels()
+    for t in labels:
+        if t.get_text() == 'Persimmon':
+            t.set_color(PERSIMMON_COLOR)
+            t.set_fontweight('bold')
 
 def get_assistant_messages(messages: List[Dict], preprocess_text: bool = False) -> List[str]:
     """Extract content of messages from the 'assistant' role.
@@ -99,19 +119,27 @@ def extract_patient_messages_by_turn(conversations: List[Dict], max_turns: int =
     
     return messages_by_turn
 
-def get_all_psi_backend_pairs(token: Optional[str] = None, dataset_name: str = "hknguyen20/psibench-data") -> List[Tuple[str, str]]:
+def get_all_psi_backend_pairs(token: Optional[str] = None, dataset_name: str = "hknguyen20/psibench-data",
+                              synthetic_dir: Optional[str] = None) -> List[Tuple[str, str]]:
     """Get all unique PSI-backend LLM pairs from HuggingFace dataset.
     
     Args:
         token: Optional HuggingFace token
         dataset_name: HuggingFace dataset name (default: "hknguyen20/psibench-data")
+        synthetic_dir: If set, discover pairs from this local folder tree instead of HF
         
     Returns:
         List of (psi, backend_llm) tuples
     """
+    if synthetic_dir:
+        from psibench.data_loader.main_loader import get_local_psi_backend_pairs
+        print(f"Scanning local synthetic data under {synthetic_dir}")
+        return get_local_psi_backend_pairs(synthetic_dir)
+
     hf_token = token or os.getenv("HF_TOKEN")
     dataset = load_dataset(dataset_name, split="train", token=hf_token)
     df = dataset.to_pandas()
+    print(f"Loaded dataset {dataset_name}")
     
     # Get unique pairs
     unique_pairs = df[['psi', 'backend_llm']].drop_duplicates()
@@ -170,7 +198,9 @@ BACKEND_LABEL_MAPPING = {
     'Qwen2.5-72B-Instruct': 'qwen2.5-72b-i',
 }
 def create_display_label(dataset):
-    """Convert 'patientpsi-backend' to 'PS-shortened_backend'"""
+    """Convert 'patientpsi-backend' to 'PS-shortened_backend' (Persimmon has no backend)."""
+    if is_persimmon_label(dataset):
+        return 'Persimmon'
     for psi in PSI_ABBREV.keys():
         if dataset.startswith(psi):
             # Extract backend part after PSI prefix

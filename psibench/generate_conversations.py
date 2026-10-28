@@ -20,6 +20,7 @@ from psibench.data_loader.ccd_loader import load_ccds
 from psibench.agents.patient import PatientAgent
 from psibench.agents.therapist import TherapistAgent
 from psibench.models.patient_psi import generate_chain, generate_chain_batch
+from psibench.models.persimmon import DEFAULT_MODEL as DEFAULT_PERSIMMON_MODEL, PersimmonPatient, PersimmonRefused
 
 
 def validate_patient_turns(messages: list, expected_num_patient_turns: int) -> bool:
@@ -95,13 +96,15 @@ def parse_args():
         "--dataset", type=str, default="esc", help="Dataset type: esc | hope | annomi | all (default: esc)"
     )
     parser.add_argument("--output-dir", type=str, default="data/synthetic", help="Output directory")
-    parser.add_argument("--psi", type=str, default="patientpsi", help="Type of patient sim to use: patientpsi | roleplaydoh")
+    parser.add_argument("--psi", type=str, default="patientpsi", help="Type of patient sim to use: patientpsi | roleplaydoh | persimmon")
     parser.add_argument("--N", type=int, default=None, 
                     help="Number of conversations to generate (default: all available samples)")
     parser.add_argument("--config", type=str, default="configs/default.yaml",
                        help="Path to config file (default: configs/default.yaml)")
     parser.add_argument("--batch-size", type=int, default=1,
                        help="Number of parallel tasks to run (default: 1)")
+    parser.add_argument("--reverse", action="store_true",
+                       help="Process sessions in reverse order (last session first)")
     parser.add_argument("--ccd-source", type=str, default=None,
                        help="Source for pre-extracted CCDs: local directory path or HuggingFace dataset ID. "
                             "If not provided, CCDs will be extracted on-the-fly (patientpsi only)")
@@ -116,7 +119,8 @@ def parse_args():
 
 
 def run_session(
-    profile: Dict[str, Any], real_messages: list, config: Dict[str, Any]) -> Dict[str, Any]:
+    profile: Dict[str, Any], real_messages: list, config: Dict[str, Any],
+    session_id: Any = None, source: Any = None) -> Dict[str, Any]:
     """Run a simulated counseling session matching the length of real messages.
     
     Args:
@@ -130,12 +134,17 @@ def run_session(
     """
     # Get number of retries from config, default to 3
     num_retries = config.get("num_retries", 3)
-    
+    is_persimmon = config.get("patient", {}).get("simulator") == "persimmon"
+
     for retry in range(num_retries):
+        patient = None
         try:
             # print("Running Session")
             # Initialize agents
-            patient = PatientAgent(patient_profile=profile, config=config)
+            if is_persimmon:
+                patient = PersimmonPatient(profile, config, session_id=session_id, source=source)
+            else:
+                patient = PatientAgent(patient_profile=profile, config=config)
             therapist = TherapistAgent(config=config)
 
             messages = []
@@ -190,8 +199,14 @@ def run_session(
                     f"{empty_indices}."
                 )
             
-            return {"messages": messages, "profile": profile, "num_patient_turns": num_patient_turns}
-            
+            result = {"messages": messages, "profile": profile, "num_patient_turns": num_patient_turns}
+            if is_persimmon:
+                result["ccd"] = {}  # PATIENT-Ψ's cognitive model is not used by this arm
+                result["persimmon"] = patient.audit()
+            return result
+
+        except PersimmonRefused:
+            raise  # moderation refusals are deterministic; retrying is pointless
         except Exception as e:
             print(f"An error occurred: {e}")
             print(traceback.format_exc())
@@ -199,7 +214,10 @@ def run_session(
                 print(f"Retrying {retry+1} time(s)")
             else:
                 print(f"Max retries ({num_retries}) reached, giving up")
-    
+        finally:
+            if is_persimmon and patient is not None:
+                patient.close()
+
     return None
 
 
@@ -222,6 +240,9 @@ def main():
     config["patient"]["simulator"] = args.psi
      # Extract model name for output directory
     model_name = config.get("patient").get("model")
+    if args.psi == "persimmon":
+        # Persimmon is a hosted API model; the patient.model entry (an LLM for the other simulators) is unused.
+        model_name = (config.get("persimmon") or {}).get("model", DEFAULT_PERSIMMON_MODEL)
     # Clean model name for use in path (remove special characters)
     clean_model_name = model_name.replace("/", "_").replace(":", "_")
     
@@ -229,6 +250,9 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = load_real_dataset(args.dataset, hf_dataset=config.get("data", {}).get("real_conv_hf_dataset"))
+
+    if args.reverse:
+        df = df.iloc[::-1]
 
     if args.N:
         df = df.head(args.N)
@@ -399,6 +423,7 @@ def main():
     skipped_count = 0
     total_successes = 0
     total_failures = 0
+    refused: Dict[int, str] = {}
     
     for batch_start in range(0, len(all_tasks), args.batch_size):
         batch_end = min(batch_start + args.batch_size, len(all_tasks))
@@ -424,7 +449,7 @@ def main():
         batch_start_time = time.time()
         with ThreadPoolExecutor(max_workers=min(args.batch_size, len(tasks_to_run))) as executor:
             futures_to_task = {
-                executor.submit(run_session, profile, real_messages, config): (idx, source)
+                executor.submit(run_session, profile, real_messages, config, idx, source): (idx, source)
                 for idx, profile, real_messages, source in tasks_to_run
             }
             
@@ -439,6 +464,10 @@ def main():
                     result['source'] = source.lower()
                     save_session_results(result, output_dir, idx)
                     total_successes += 1
+                except PersimmonRefused as e:
+                    print(f"Session {idx} refused by Persimmon content moderation: {e}")
+                    refused[idx] = str(e)
+                    total_failures += 1
                 except Exception as e:
                     print(f"\nError in session {idx}: {e}")
                     print(f"Traceback: {traceback.format_exc()}")
@@ -451,6 +480,9 @@ def main():
     print(f"    # succeeded sessions: {total_successes}")
     print(f"    # failed sessions: {total_failures}")
     print(f"    # skipped sessions (already valid): {skipped_count}")
+    if refused:
+        (output_dir / "refused.json").write_text(json.dumps(refused, indent=2))
+        print(f"    # refused by content moderation: {len(refused)} (see {output_dir}/refused.json)")
 
 if __name__ == "__main__":
     start_time = time.time()

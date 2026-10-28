@@ -24,7 +24,7 @@ Create `.env` inside `psibench/` with:
 - `output/`: evaluation results (csv/json/plots)
 	- `output/human_annotation/`
 	- `output/depressive_markers/`
-	- `output/emotion_detection/`
+	- `output/valence_analysis/`
 	- `output/length_comparison/`
 	- `output/lexical_diversity/`
 
@@ -34,7 +34,7 @@ Generated synthetic conversations are written under:
 ## 3) Generate synthetic data
 
 Common options:
-- `--psi`: `patientpsi`(default), `roleplaydoh`
+- `--psi`: `patientpsi`(default), `roleplaydoh`, `persimmon` (hosted API; needs `pip install humansand`, Python 3.12+, and `export USER_MODEL_API_KEY=usk_...`; optional `persimmon:` config block with `model`, `harness`, `max_tokens`, `requests_per_minute`. Use a small `--batch-size`, e.g. 2, since the key allows 60 requests/min)
 
 If using offline vLLM models, follow `vllm_serve/README.md` first.
 
@@ -66,7 +66,7 @@ Pipeline steps:
 
 | Step | What happens | Notes |
 |------|-------------|-------|
-| 1 | LLM classifies **emotion** and **PTC** labels on HF data | Both run in parallel; LLM model/API set in config |
+| 1 | LLM classifies **valence** and **PTC** labels on HF data | Both run in parallel; LLM model/API set in config |
 | 2 | **JS divergence** computed from classification outputs | Sequential; waits for Step 1 |
 | 3 | **Depressive markers**, **message lengths**, **lexical diversity** | All three run in parallel |
 | 4 | **Aggregate** score combining all five metrics | Writes summary to `<output-dir>/aggregate/` |
@@ -80,7 +80,7 @@ Each metric file includes runnable command examples in the top comment/docstring
 
 Metric modules:
 - `psibench/eval/ptc/ptc_classification.py`
-- `psibench/eval/emotion_classification.py`
+- `psibench/eval/valence_classification.py`
 - `psibench/eval/js_divergence.py`
 - `psibench/eval/message_lengths.py`
 - `psibench/eval/depressive_linguistic_markers.py`
@@ -91,7 +91,7 @@ After running all metrics, aggregate multiple evaluation metrics into a single s
 ## 5) Key outputs to check
 
 - PTC analysis: `output/ptc_analysis/`
-- Emotion detection results: `output/emotion_analysis/`
+- Valence analysis results: `output/valence_analysis/`
 - Depressive marker analysis: `output/depressive_markers/`
 - Length comparison: `output/length_comparison/`
 - Lexical diversity: `output/lexical_diversity/`

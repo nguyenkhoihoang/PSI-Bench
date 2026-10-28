@@ -1,7 +1,8 @@
 import os
 from typing import Literal, Optional
 from datasets import load_dataset
-from psibench.data_loader.utils import merge_consecutive_messages
+from collections import defaultdict
+from psibench.data_loader.utils import merge_consecutive_messages, normalize_backend_name
 import pandas as pd
 from pathlib import Path
 import json
@@ -97,7 +98,7 @@ def _safe_json_load(value):
     return value
 
 
-def load_synthetic_hf_to_df(psi: str, backend_llm: str, split: str = "train", session_id: int = None, token: Optional[str] = None, dataset_name: str = "hknguyen20/psibench-conv"):
+def load_synthetic_hf_to_df(psi: str, backend_llm: str, split: str = "train", session_id: int = None, token: Optional[str] = None, dataset_name: str = "hknguyen20/psibench-conv", synthetic_dir: Optional[str] = None):
     """Load PSI-bench synthetic data from HuggingFace and filter by simulator and backend.
 
     Args:
@@ -107,10 +108,15 @@ def load_synthetic_hf_to_df(psi: str, backend_llm: str, split: str = "train", se
         session_id: Optional session ID to filter by.
         token: Optional HF token; falls back to HF_TOKEN env var.
         dataset_name: HuggingFace dataset name (default: "hknguyen20/psibench-conv").
+        synthetic_dir: If set, read local session_*.json under this root instead of HF.
 
     Returns:
         Pandas DataFrame filtered to the requested psi and backend_llm.
     """
+
+    if synthetic_dir:
+        df = load_synthetic_local_to_df(synthetic_dir, psi, backend_llm)
+        return df if session_id is None or df.empty else df[df["session_id"] == session_id].copy()
 
     hf_token = token or os.getenv("HF_TOKEN")
     dataset = load_dataset(dataset_name, split=split, token=hf_token)
@@ -139,3 +145,57 @@ def load_synthetic_hf_to_df(psi: str, backend_llm: str, split: str = "train", se
 
     return filtered
 
+
+
+
+# Folder names that sit below <psi>/<model>/ in the generation output layout
+# (generate_conversations.py writes <output_dir>/<psi>/<model>/<dataset>/session_*.json).
+LOCAL_DATASET_DIRS = {"all", "esc", "hope", "annomi"}
+
+
+def discover_local_pairs(root: str):
+    """Recurse through root and map (psi, backend_llm) -> [dirs containing session_*.json].
+
+    Mirrors the HF dataset's psi/backend_llm columns using the folder layout
+    <psi>/<model>/<dataset>/session_*.json. The psi and model are read from the path of each
+    directory that holds sessions, so root may be the whole data tree (data/synthetic), one psi,
+    or a single <psi>/<model>/all folder. backend_llm is normalized like the HF values.
+    If a pair has an 'all' directory only that one is used (the others would overlap it).
+    """
+    root = Path(root).resolve()
+    dirs = sorted({f.parent for f in root.rglob("session_*.json")})
+    pairs = defaultdict(list)
+    for d in dirs:
+        model_dir = d.parent if d.name in LOCAL_DATASET_DIRS else d
+        pairs[(model_dir.parent.name, normalize_backend_name(model_dir.name))].append(d)
+    for key, ds in pairs.items():
+        all_dirs = [d for d in ds if d.name == "all"]
+        if all_dirs:
+            pairs[key] = all_dirs
+    return dict(pairs)
+
+
+def get_local_psi_backend_pairs(root: str):
+    return sorted(discover_local_pairs(root))
+
+
+def load_synthetic_local_to_df(root: str, psi: str, backend_llm: str):
+    """Local counterpart of load_synthetic_hf_to_df, reading session_*.json under root."""
+    dirs = discover_local_pairs(root).get((psi, normalize_backend_name(backend_llm)), [])
+    rows = []
+    for d in dirs:
+        for f in sorted(d.glob("session_*.json")):
+            try:
+                with open(f, "r", encoding="utf-8") as fh:
+                    row = json.load(fh)
+            except Exception as e:
+                print(f"[WARNING] Failed to load {f}: {e}")
+                continue
+            sid = f.stem.split("_", 1)[1]
+            row["session_id"] = int(sid) if sid.isdigit() else sid
+            row["psi"] = psi
+            row["backend_llm"] = backend_llm
+            rows.append(row)
+    if not rows:
+        print(f"[WARNING] No local sessions for psi='{psi}' and backend_llm='{backend_llm}' under {root}")
+    return pd.DataFrame(rows)

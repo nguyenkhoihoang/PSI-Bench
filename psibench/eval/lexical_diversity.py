@@ -54,7 +54,7 @@ from psibench.eval.utils import (
     get_all_psi_backend_pairs, safe_dir_name, PSI_ABBREV, PSI_LABELS, extract_model_size, 
     shorten_backend_name, sort_key_by_psi_and_size, sort_key_by_base_model, 
     sort_key_by_psi_base_model, sort_summary_key, get_assistant_messages, aggregate_messages,
-    extract_base_model, get_model_family_priority, PSI_COLORS
+    extract_base_model, get_model_family_priority, PSI_COLORS, is_persimmon_label
 )
 from psibench.data_loader.utils import normalize_backend_name
 
@@ -242,7 +242,8 @@ def analyze_session(
     return results
 
 
-def compare_all_hf_pairs(output_dir: str, min_tokens: int = 100, dataset_name: str = 'hknguyen20/psibench-conv', sort_method: str = 'psi-size'):
+def compare_all_hf_pairs(output_dir: str, min_tokens: int = 100, dataset_name: str = 'hknguyen20/psibench-conv', sort_method: str = 'psi-size',
+                         synthetic_dir: str = None):
     """Compare all available HF psi/backend pairs against all real datasets combined.
     
     Args:
@@ -267,7 +268,7 @@ def compare_all_hf_pairs(output_dir: str, min_tokens: int = 100, dataset_name: s
 
     # Get all unique (psi, backend_llm) pairs
     print("\n[INFO] Loading all unique PSI-backend pairs...")
-    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name)
+    all_pairs = get_all_psi_backend_pairs(dataset_name=dataset_name, synthetic_dir=synthetic_dir)
     print(f"[INFO] Found {len(all_pairs)} unique (psi, backend_llm) pairs")
 
     # Store concatenated texts for each dataset
@@ -331,7 +332,7 @@ def compare_all_hf_pairs(output_dir: str, min_tokens: int = 100, dataset_name: s
         
         try:
             # Load all data for this psi/backend pair
-            synthetic_df = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name)
+            synthetic_df = load_synthetic_hf_to_df(psi=psi, backend_llm=normalized_backend, dataset_name=dataset_name, synthetic_dir=synthetic_dir)
             
             if synthetic_df.empty:
                 print(f"[WARNING] No data found for {label}")
@@ -445,6 +446,9 @@ def create_comparison_visualizations(df: pd.DataFrame, output_dir: Path, min_tok
         if dataset == 'Real':
             raw_df.at[idx, 'psi_type'] = 'Real'
             raw_df.at[idx, 'backend_name'] = 'human'
+        elif is_persimmon_label(dataset):
+            raw_df.at[idx, 'psi_type'] = 'persimmon'
+            raw_df.at[idx, 'backend_name'] = 'persimmon'
         else:
             for psi in ['patientpsi', 'roleplaydoh']:
                 if dataset.startswith(psi):
@@ -455,7 +459,7 @@ def create_comparison_visualizations(df: pd.DataFrame, output_dir: Path, min_tok
                     break
     
     # Get unique backends (excluding human)
-    synthetic_backends = sorted([b for b in raw_df['backend_name'].unique() if b != 'human'])
+    synthetic_backends = sorted([b for b in raw_df['backend_name'].unique() if b not in ('human', 'persimmon')])
     
     # Sort backends based on method
     if sort_method == 'wasserstein':
@@ -494,7 +498,9 @@ def create_comparison_visualizations(df: pd.DataFrame, output_dir: Path, min_tok
         # Default: sort by model size
         synthetic_backends = sorted(synthetic_backends, key=lambda x: extract_model_size(x))
     
-    backend_order = ['human'] + synthetic_backends
+    has_persimmon = (raw_df['backend_name'] == 'persimmon').any()
+    # Persimmon is a single method without a backend LLM, so it gets its own row right below Human.
+    backend_order = ['human'] + (['persimmon'] if has_persimmon else []) + synthetic_backends
     
     # 1. Boxplot comparison across all datasets - GROUPED BY MODEL
     # Use a wider, flatter aspect ratio to reduce vertical stretching.
@@ -515,7 +521,7 @@ def create_comparison_visualizations(df: pd.DataFrame, output_dir: Path, min_tok
         x='mtld', 
         hue='psi_type',
         order=backend_order,
-        hue_order=['Real', 'patientpsi', 'roleplaydoh'],
+        hue_order=['Real'] + (['persimmon'] if has_persimmon else []) + ['patientpsi', 'roleplaydoh'],
         palette=psi_colors,
         linewidth=1.4,
         fliersize=2.5,
@@ -599,6 +605,9 @@ def create_comparison_visualizations(df: pd.DataFrame, output_dir: Path, min_tok
         if dataset == 'Real':
             display_names[dataset] = 'Real'
         else:
+            if is_persimmon_label(dataset):
+                display_names[dataset] = 'Persimmon'
+                continue
             for psi, abbrev in PSI_ABBREV.items():
                 if dataset.startswith(psi):
                     backend_part = dataset[len(psi):].lstrip('-_')
@@ -678,6 +687,17 @@ def calculate_wasserstein_distances(df: pd.DataFrame, output_dir: Path, min_toke
         # Calculate Wasserstein distance
         wd = wasserstein_distance(real_mtld, synth_mtld)
         
+        if is_persimmon_label(dataset):
+            results.append({
+                'dataset': 'Persimmon',
+                'n_samples': len(synth_mtld),
+                'wasserstein_distance': round(wd, 4),
+                'mean_mtld': round(synth_mtld.mean(), 2),
+                'std_mtld': round(synth_mtld.std(), 2)
+            })
+            print(f"  - {dataset}: WD={wd:.4f}, n={len(synth_mtld)}")
+            continue
+
         # Extract PSI and backend for better labeling
         backend_name = None
         
@@ -800,6 +820,13 @@ def main():
         help="Sorting method for results: 'psi-size' (sort by model size), 'base-model' (sort by base model family, then size), 'psi-base-model' (same as psi-size), or 'wasserstein' (sort by Wasserstein distance, requires wasserstein_distances.csv) (default: psi-size)"
     )
     
+    parser.add_argument(
+        "--synthetic-dir",
+        type=str,
+        default=None,
+        help="Local folder tree of session_*.json (<psi>/<model>/<dataset>/...) used instead of the HF synthetic data; psi and model are read from the folder names"
+    )
+
     args = parser.parse_args()
     
     # Load config
@@ -821,7 +848,8 @@ def main():
             output_dir=args.output_dir,
             min_tokens=args.min_tokens,
             dataset_name=dataset_name,
-            sort_method=args.sort_method
+            sort_method=args.sort_method,
+            synthetic_dir=args.synthetic_dir,
         )
 
 

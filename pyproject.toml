@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "An evaluation framework for evaluating patient simulators"
 requires-python = ">=3.11"
 authors = [
-    { name = "nguyenkhoihoang" }
+    { name = "XXXX" }
 ]
 dependencies = [
     "pydantic>=2.0.0",
@@ -39,6 +39,6 @@ dependencies = [
     "scikit-learn",
     "statsmodels",
     "spacy==3.7.2",
-    "emoatlas",
-    "supabase"
+    "supabase",
+    "humansand; python_version >= '3.12'"
 ]
