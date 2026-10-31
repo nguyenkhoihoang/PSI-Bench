@@ -26,6 +26,8 @@ FAMILY_MARKER_STYLES = {
     'GPT': ['v', '^', '<', '>'],
     'Llama': ['+', 'P'],
     'Qwen': ['d', 'D'],
+    'OSim': ['h'],
+    'Ditto': ['H'],
     'Unknown': BACKEND_MARKER_STYLES,
 }
 
@@ -196,6 +198,8 @@ BACKEND_LABEL_MAPPING = {
     'Llama-3.3-70B-Instruct': 'llama3.3-70b-i',
     'Llama-3.1-8B-Instruct': 'llama3.1-8b-i',
     'Qwen2.5-72B-Instruct': 'qwen2.5-72b-i',
+    'osim-8b': 'osim-8b',
+    'Ditto-8B': 'ditto-8b',
 }
 def create_display_label(dataset):
     """Convert 'patientpsi-backend' to 'PS-shortened_backend' (Persimmon has no backend)."""
@@ -318,7 +322,12 @@ def extract_base_model(model_name: str) -> str:
     model_name_lower = model_name.lower()
     
     # Check for common model families (case-insensitive)
-    if 'llama' in model_name_lower:
+    # cmu-lti user simulators are Llama-based; match them before the generic families
+    if 'osim' in model_name_lower:
+        return 'OSim'
+    elif 'ditto' in model_name_lower:
+        return 'Ditto'
+    elif 'llama' in model_name_lower:
         return 'Llama'
     elif 'qwen' in model_name_lower:
         return 'Qwen'
@@ -413,6 +422,8 @@ def get_model_family_priority(base_model: str) -> int:
         'Gemma': 4,
         'Falcon': 5,
         'Phi': 6,
+        'OSim': 7,
+        'Ditto': 8,
         'Unknown': 999
     }
     return priority_order.get(base_model, 999)

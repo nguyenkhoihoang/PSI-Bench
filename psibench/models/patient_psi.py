@@ -8,6 +8,8 @@ https://github.com/ruiyiw/patient-psi/tree/main/python/generation
 from langchain.output_parsers import PydanticOutputParser
 from langchain_litellm import ChatLiteLLM
 
+from psibench.agents.base import _SHARED_HTTP_HANDLER
+
 from psibench.models.generation_template import GenerationModel
 from dotenv import load_dotenv, find_dotenv
 import os
@@ -396,6 +398,7 @@ async def generate_chain(data, config):
         api_key=api_key,
         api_base=api_base,
         temperature=patient.get("temperature"),
+        model_kwargs={"client": _SHARED_HTTP_HANDLER},
     )
     attempts = 0
 
