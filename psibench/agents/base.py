@@ -4,8 +4,20 @@ from typing import Dict, Any
 from langchain_litellm import ChatLiteLLM
 import logging
 import httpx
+from litellm.llms.custom_httpx.http_handler import HTTPHandler
 
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
+# One caller-owned HTTP client shared by every agent. Without it, litellm builds and
+# caches its own clients; under hundreds of concurrent threads those clients race in
+# the cache and get closed mid-request ("httpx.ReadError: [Errno 9] Bad file descriptor").
+# litellm never closes a client it was handed.
+_SHARED_HTTP_HANDLER = HTTPHandler(
+    client=httpx.Client(
+        limits=httpx.Limits(max_connections=2048, max_keepalive_connections=2048),
+        timeout=httpx.Timeout(600.0),
+    )
+)
 
 class BaseAgent:
     """Base class for LLM-based agents with common functionality."""
@@ -53,7 +65,8 @@ class BaseAgent:
             api_key=api_key,
             api_base=api_base,
             temperature=config.get(agent_type).get("temperature"),
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            model_kwargs={"client": _SHARED_HTTP_HANDLER},
         )
     
     def _format_history(self, history: list[Dict[str, str]], max_history_tokens: int = 6000) -> str:

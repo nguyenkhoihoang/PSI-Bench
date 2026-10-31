@@ -28,6 +28,7 @@ from psibench.eval.utils import (
     PSI_ABBREV,
     is_persimmon_label,
     PERSIMMON_COLOR,
+    assign_backend_markers,
 )
 
 from psibench.data_loader.main_loader import (
@@ -446,22 +447,8 @@ def plot_metric_comparison(real_df: pd.DataFrame, synthetic_data: Dict[str, pd.D
                     unique_backends.add(backend_part)
                 break
     
-    # Define marker styles to cycle through
-    marker_styles = ['o', '^', 's', 'D', 'v', '<', '>', 'p', '*', 'h']
-    
-    # Sort backends based on method
-    if sort_method == 'base-model':
-        def sort_by_base_model_and_size(backend_name):
-            base_model = extract_base_model(backend_name)
-            model_priority = get_model_family_priority(base_model)
-            model_size = extract_model_size(backend_name)
-            return (model_priority, model_size)
-        sorted_backends = sorted(unique_backends, key=sort_by_base_model_and_size)
-    else:
-        sorted_backends = sorted(unique_backends, key=lambda b: extract_model_size(b))
-    
-    backend_markers = {backend: marker_styles[i % len(marker_styles)] 
-                       for i, backend in enumerate(sorted_backends)}
+    # Family-aware markers shared with the other eval plots
+    backend_markers = assign_backend_markers(list(unique_backends))
     
     # Track which PSI types and backends are actually used
     used_psi_types = set()
